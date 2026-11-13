@@ -4,7 +4,7 @@
   "training_type": "GlobalStandard",
   "hyperparameters": {
     "n_epochs": 2,
-    "batch_size": 4,
+    "batch_size": 3,
     "learning_rate_multiplier": 0.5
   },
   "seed": 42,
