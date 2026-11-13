@@ -33,7 +33,7 @@ inputs:
     mode: ro_mount
   test_start: "2018-06-01"
   learning_rate: 0.05
-  max_iter: 600
+  max_iter: 610
 
 environment: azureml://registries/azureml/environments/sklearn-1.5/versions/54
 compute: azureml:course-cpu
