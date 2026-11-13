@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Exercise 01: Olist EDA and feature engineering | Operationalize Machine Learning Models</title>
+<link rel="stylesheet" href="../../assets/site.css"></head>
+<body><header><a class="brand" href="../../index.html">Operationalize Machine Learning Models</a><span>Student lab guide</span></header>
+<main><nav><a href="../../index.html">← All exercises</a></nav><article><h1>Exercise 01: Olist EDA and feature engineering</h1>
+<h2>Goal</h2>
+<p>Understand the Olist tables and construct freight-cost features without target leakage.</p>
+<h2>Fork and clone the public repository</h2>
+<p>Install Python 3.10 or 3.11, Git, Azure CLI, and a notebook editor. The public course repository can be inspected or cloned without a GitHub login:</p>
+<pre><code>git clone https://github.com/kavsrd13/operationalize-ml-models-labs.git</code></pre>
+<p>To save your exercise work in your own GitHub account, sign in at <a href="https://github.com/">GitHub</a>, open <a href="https://github.com/kavsrd13/operationalize-ml-models-labs">the course repository</a>, select <strong>Fork</strong>, and then select <strong>Create fork</strong>. Clone your fork instead of the upstream repository:</p>
+<pre><code>git clone https://github.com/YOUR-GITHUB-USERNAME/operationalize-ml-models-labs.git
+Set-Location .\operationalize-ml-models-labs
+git remote add upstream https://github.com/kavsrd13/operationalize-ml-models-labs.git
+git remote -v</code></pre>
+<p>No <code>gh auth login</code> command is needed for cloning. GitHub sign-in is required only to create the fork or push changes to it.</p>
+<p>Run local setup; this lab does not create Azure resources:</p>
+<pre><code>python .\00-Shared-Setup-and-Data\scripts\bootstrap.py --skip-azure</code></pre>
+<p>Select the <strong>Python (Olist Azure ML)</strong> notebook kernel.</p>
+<h2>Code files</h2>
+<p>The actual code for this exercise is here:</p>
+<ul>
+<li><a href="../olist-eda-feature-engineering.ipynb"><code>olist-eda-feature-engineering.ipynb</code></a></li>
+</ul>
+<p>Run commands from the repository root. Olist&#x27;s source ZIP is stored once in <code>datasets/olist</code> and extracted by setup.</p>
+<h2>Run</h2>
+<ol start="1">
+<li>Use the local setup above and select the <strong>Python (Olist Azure ML)</strong> kernel.</li>
+<li>Open <code>../olist-eda-feature-engineering.ipynb</code> and run its cells from top to bottom.</li>
+<li>Identify the nine input CSVs. Check join cardinality before interpreting rows: order items and orders have different grains.</li>
+<li>Inspect freight target distribution, missing values, purchase dates, and the train/test time split. Explain why delivery timestamps cannot be checkout features.</li>
+<li>Confirm the notebook writes processed data to this exercise&#x27;s <code>outputs</code> folder. Open a few rows and compare them with the feature list used in exercise 03.</li>
+</ol>
+<p>No Azure training job is submitted. See <code>ORIGINAL_README.md</code> for the source note.</p></article></main><footer>Run cloud commands in your own Azure ML workspace. See each lab's validation status.</footer></body></html>

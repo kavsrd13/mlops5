@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Exercise 06: Late delivery and Responsible AI | Operationalize Machine Learning Models</title>
+<link rel="stylesheet" href="../../assets/site.css"></head>
+<body><header><a class="brand" href="../../index.html">Operationalize Machine Learning Models</a><span>Student lab guide</span></header>
+<main><nav><a href="../../index.html">← All exercises</a></nav><article><h1>Exercise 06: Late delivery and Responsible AI</h1>
+<h2>Goal</h2>
+<p>Train a late-delivery classifier, register its model, and inspect cohort errors, feature explanations, and the Responsible AI dashboard.</p>
+<h2>Fork and clone the public repository</h2>
+<p>Install Python 3.10 or 3.11, Git, Azure CLI, and a notebook editor. The public course repository can be inspected or cloned without a GitHub login:</p>
+<pre><code>git clone https://github.com/kavsrd13/operationalize-ml-models-labs.git
+Set-Location .\operationalize-ml-models-labs</code></pre>
+<p>To save your exercise work in your own GitHub account, sign in at <a href="https://github.com/">GitHub</a>, open <a href="https://github.com/kavsrd13/operationalize-ml-models-labs">the course repository</a>, select <strong>Fork</strong>, and then select <strong>Create fork</strong>. Clone your fork instead of the upstream repository:</p>
+<pre><code>git clone https://github.com/YOUR-GITHUB-USERNAME/operationalize-ml-models-labs.git
+Set-Location .\operationalize-ml-models-labs
+git remote add upstream https://github.com/kavsrd13/operationalize-ml-models-labs.git
+git remote -v</code></pre>
+<p>No <code>gh auth login</code> command is needed for cloning. GitHub sign-in is required only to create the fork or push changes to it.</p>
+<h2>Create or reuse Azure resources for this lab</h2>
+<p>Set your own subscription, resource group, workspace, and region. The commands create the group and workspace if needed, install the shared Olist asset, and create one scale-to-zero training cluster named <code>course-cpu</code>. Reuse the same names in later labs. Check regional quota for <code>Standard_E4ds_v4</code>.</p>
+<pre><code>$SUB = &#x27;YOUR_SUBSCRIPTION_ID&#x27;
+$RG = &#x27;rg-course-ml&#x27;
+$WS = &#x27;mlw-course-ml&#x27;
+$LOCATION = &#x27;eastus&#x27;
+az login
+az account set --subscription $SUB
+az extension add --name ml --yes
+az group create -n $RG -l $LOCATION
+az ml workspace show -n $WS -g $RG --subscription $SUB 2&gt;$null | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  az ml workspace create -n $WS -g $RG -l $LOCATION --subscription $SUB
+}
+python .\00-Shared-Setup-and-Data\scripts\bootstrap.py `
+  --subscription $SUB --resource-group $RG --workspace $WS --create-cluster
+az ml compute show -n course-cpu -g $RG -w $WS --query name -o tsv
+az ml data show -n olist-ecommerce-raw -v 1 -g $RG -w $WS --query name -o tsv</code></pre>
+<h2>Code files</h2>
+<p>The actual code for this exercise is here:</p>
+<ul>
+<li><a href="../prepare.py"><code>prepare.py</code></a></li>
+<li><a href="../src/train.py"><code>src/train.py</code></a></li>
+<li><a href="../jobs/train.yml"><code>jobs/train.yml</code></a></li>
+<li><a href="../jobs/rai-dashboard.yml"><code>jobs/rai-dashboard.yml</code></a></li>
+<li><a href="../data/train.yml"><code>data/train.yml</code></a></li>
+<li><a href="../data/test.yml"><code>data/test.yml</code></a></li>
+<li><a href="../data/rai-train.yml"><code>data/rai-train.yml</code></a></li>
+<li><a href="../data/rai-test.yml"><code>data/rai-test.yml</code></a></li>
+</ul>
+<p>Run commands from the repository root. Olist&#x27;s source ZIP is stored once in <code>datasets/olist</code> and extracted by setup.</p>
+<h2>Steps</h2>
+<ol start="1">
+<li>Use the <code>$RG</code> and <code>$WS</code> values from the setup above. Confirm <code>course-cpu</code> exists.</li>
+<li>Read <code>../prepare.py</code>: identify the label, checkout-time features, full train/test split, and smaller stratified dashboard copies.</li>
+<li>Run the preparation script with the Olist environment:</li>
+</ol>
+<pre><code>   .\.venv\Scripts\python.exe .\06-Late-Delivery-Responsible-AI\prepare.py</code></pre>
+<ol start="4">
+<li>Inspect the Parquet and <code>MLTable</code> files under <code>../data</code>. Register the four named assets in the <strong>same</strong> workspace:</li>
+</ol>
+<pre><code>   Get-ChildItem .\06-Late-Delivery-Responsible-AI\data\*.yml | ForEach-Object {
+     az ml data create -f $_.FullName -g $RG -w $WS
+   }</code></pre>
+<ol start="5">
+<li>Submit and monitor the training job:</li>
+</ol>
+<pre><code>   $TRAIN_JOB = az ml job create -f .\06-Late-Delivery-Responsible-AI\jobs\train.yml `
+     -g $RG -w $WS --query name -o tsv
+   az ml job show -n $TRAIN_JOB -g $RG -w $WS --query status -o tsv</code></pre>
+<p>Repeat the status command until it says <code>Completed</code>. Streaming is optional; some Azure CLI versions report <code>Incorrect padding</code> after a successful job.</p>
+<ol start="6">
+<li>In Studio inspect the full future-period classification metrics. When the job is <code>Completed</code>, register its MLflow output:</li>
+</ol>
+<pre><code>   az ml model create -n olist-late-delivery-rai --type mlflow_model `
+     --path &quot;azureml://jobs/$TRAIN_JOB/outputs/artifacts/paths/outputs/model/&quot; `
+     -g $RG -w $WS</code></pre>
+<ol start="7">
+<li>Check the returned model version. <code>../jobs/rai-dashboard.yml</code> references version 1; if yours differs, change its <code>selected_model.path</code> and <code>construct.inputs.model_info</code> to the version you just registered.</li>
+<li>Read <code>../lab-guide.html</code> for the dashboard&#x27;s component flow, then submit:</li>
+</ol>
+<pre><code>   $DASHBOARD_JOB = az ml job create -f .\06-Late-Delivery-Responsible-AI\jobs\rai-dashboard.yml `
+     -g $RG -w $WS --query name -o tsv
+   az ml job show -n $DASHBOARD_JOB -g $RG -w $WS --query status -o tsv</code></pre>
+<p>Repeat the status command until it says <code>Completed</code>.</p>
+<ol start="9">
+<li>Open the dashboard in Studio. Compare error and explanation views across cohorts. Observed differences alone do not establish causality or a fairness violation.</li>
+</ol>
+<h2>Next exercise</h2>
+<p>Keep the same workspace, registered assets, and <code>course-cpu</code> cluster. Continue with <a href="../../07-Late-Delivery-Hyperparameter-Sweep/Instruction/index.html">Exercise 07</a>. Do not delete the resource group or rerun shared setup.</p></article></main><footer>Run cloud commands in your own Azure ML workspace. See each lab's validation status.</footer></body></html>

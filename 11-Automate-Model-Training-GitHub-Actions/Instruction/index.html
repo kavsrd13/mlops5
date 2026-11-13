@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Exercise 11: Automate Azure ML training with GitHub Actions | Operationalize Machine Learning Models</title>
+<link rel="stylesheet" href="../../assets/site.css"></head>
+<body><header><a class="brand" href="../../index.html">Operationalize Machine Learning Models</a><span>Student lab guide</span></header>
+<main><nav><a href="../../index.html">← All exercises</a></nav><article><h1>Exercise 11: Automate Azure ML training with GitHub Actions</h1>
+<p>In this exercise, you provision a complete Azure Machine Learning training environment with Bicep and use GitHub Actions to train the Olist freight-cost model. GitHub authenticates to Azure with OpenID Connect (OIDC), so the repository does not store an Azure client secret.</p>
+<p>The end-to-end path is:</p>
+<pre><code>Push training change to your repository&#x27;s main branch
+    -&gt; GitHub Actions signs in to Azure with OIDC
+    -&gt; workflow validates the workspace, data asset, and compute cluster
+    -&gt; workflow submits an Azure ML command job
+    -&gt; Azure ML mounts the registered Olist data on course-cpu
+    -&gt; train.py trains and compares three models
+    -&gt; Azure ML stores metrics, plots, and the MLflow model</code></pre>
+<h2>What this exercise creates</h2>
+<p>The setup uses generic, reusable names. The resource-group and workspace names come from your answers; supporting names are derived consistently.</p>
+<table><thead><tr><th>Item</th><th>Default or pattern</th><th>Purpose</th></tr></thead><tbody>
+<tr><td>Resource group</td><td><code>rg-course-ml</code></td><td>Contains every Azure resource for the lab. Use a unique suffix in a shared subscription.</td></tr>
+<tr><td>Azure ML workspace</td><td><code>mlw-course-ml</code></td><td>Stores jobs, assets, metrics, models, and experiment metadata.</td></tr>
+<tr><td>Storage account</td><td><code>stcourse&lt;unique-suffix&gt;</code></td><td>Holds uploaded data, job code, outputs, and model files.</td></tr>
+<tr><td>Key vault</td><td><code>kv-course-&lt;unique-suffix&gt;</code></td><td>Stores workspace-managed secrets and datastore credentials.</td></tr>
+<tr><td>Log Analytics</td><td><code>log-course-&lt;unique-suffix&gt;</code></td><td>Stores platform monitoring data.</td></tr>
+<tr><td>Application Insights</td><td><code>appi-course-&lt;unique-suffix&gt;</code></td><td>Provides workspace telemetry.</td></tr>
+<tr><td>Training cluster</td><td><code>course-cpu</code></td><td>Runs the Azure ML command job on <code>Standard_E4ds_v4</code>, with 0–1 dedicated Linux nodes.</td></tr>
+<tr><td>GitHub managed identity</td><td><code>id-course-github</code></td><td>Lets the GitHub workflow request short-lived Azure tokens.</td></tr>
+<tr><td>Federated credential</td><td><code>github-main</code></td><td>Trusts only the <code>main</code> branch of your student repository.</td></tr>
+<tr><td>Workspace role</td><td>AzureML Data Scientist</td><td>Lets the GitHub identity read assets and submit/monitor jobs without managing the workspace or compute.</td></tr>
+<tr><td>Data asset</td><td><code>olist-ecommerce-raw:1</code></td><td>A versioned <code>uri_folder</code> containing the nine original Olist CSV files.</td></tr>
+</tbody></table>
+<p>The Bicep deployment creates the resource group and the first ten Azure items. After deployment, <code>setup.ps1</code> uploads and registers the data asset through the Azure ML CLI.</p>
+<p><strong>This lab does not create a compute instance.</strong> A compute instance is an interactive development machine. You edit code locally and GitHub submits the job, so only the scale-to-zero <code>course-cpu</code> training cluster is required.</p>
+<p>The workspace can create service-managed storage containers and system datastores inside the named storage account. Because the job uses a curated Azure ML environment, no dedicated container registry is created by this template.</p>
+<h2>What data and compute the training job uses</h2>
+<p>The exact cloud job definition is <code>11-Automate-Model-Training-GitHub-Actions/jobs/train-job.yml</code>.</p>
+<table><thead><tr><th>Job setting</th><th>Value</th></tr></thead><tbody>
+<tr><td>Experiment</td><td><code>olist-freight-cost</code></td></tr>
+<tr><td>Display name</td><td><code>freight-cost-gradient-boosting</code></td></tr>
+<tr><td>Code uploaded</td><td><code>11-Automate-Model-Training-GitHub-Actions/src/</code></td></tr>
+<tr><td>Entry script</td><td><code>train.py</code></td></tr>
+<tr><td>Data input</td><td><code>azureml:olist-ecommerce-raw:1</code></td></tr>
+<tr><td>Data delivery</td><td><code>ro_mount</code> (read-only mount on the training node)</td></tr>
+<tr><td>Default compute</td><td><code>azureml:course-cpu</code></td></tr>
+<tr><td>Runtime environment</td><td>Azure ML curated <code>sklearn-1.5</code>, version <code>54</code></td></tr>
+<tr><td>Time split</td><td>Before <code>2018-06-01</code> for training; on/after that date for testing</td></tr>
+</tbody></table>
+<p>The workflow reads <code>AZURE_ML_COMPUTE</code> and overrides the YAML compute value at submission. Setup writes that variable as <code>course-cpu</code>, so the checked value, submitted value, and created cluster are the same.</p>
+<p><code>train.py</code> reads seven files from the mounted nine-file asset: order items, orders, customers, sellers, products, geolocation, and category translation. Payments and reviews remain in the raw versioned asset but are not needed for this freight-cost model. The script compares a median baseline, ridge regression, and histogram gradient boosting. It logs parameters, metrics, plots, feature importance, Git commit metadata, and an MLflow-format model.</p>
+<p>The GitHub-hosted runner only authenticates, validates resources, and submits the job. <strong>Model training and data access happen on <code>course-cpu</code> inside Azure ML.</strong> The raw CSV files are not downloaded to the GitHub runner.</p>
+<h2>Before you start</h2>
+<p>You need:</p>
+<ul>
+<li>An Azure subscription where you can create resources and role assignments. <strong>Owner</strong> is sufficient. Alternatively, use <strong>Contributor</strong> plus **User Access Administrator** at the subscription scope.</li>
+<li>Available regional quota for at least four dedicated-family vCPUs used by <code>Standard_E4ds_v4</code>. You can pass another compatible VM size to setup if your region has different quota.</li>
+<li>A GitHub account that can create and administer a repository from a template.</li>
+<li>Git, Azure CLI, GitHub CLI, PowerShell, and Python installed locally.</li>
+<li>Permission to run billable Azure ML compute. The cluster scales to zero after 120 seconds when idle, but the training node incurs cost while running.</li>
+</ul>
+<h2>Step 1: Create your GitHub copy and clone it</h2>
+<ol start="1">
+<li>Open <a href="https://github.com/kavsrd13/operationalize-ml-models-labs">kavsrd13/operationalize-ml-models-labs</a>.</li>
+<li>Select <strong>Use this template</strong> → <strong>Create a new repository</strong>. Choose your GitHub account and give the repository any name, such as <code>mlops3</code>.</li>
+<li>Clone your GitHub copy without signing in to GitHub CLI. Replace both placeholders. The final <code>lab11-student</code> argument deliberately gives the local folder a known name even when the GitHub repository has another name:</li>
+</ol>
+<pre><code>git clone https://github.com/&lt;your-github-name&gt;/&lt;your-repository-name&gt;.git lab11-student
+Set-Location .\lab11-student
+git switch main</code></pre>
+<p>For example, if your repository is <code>kavsrd13/mlops3</code>, run:</p>
+<pre><code>git clone https://github.com/kavsrd13/mlops3.git lab11-student
+Set-Location .\lab11-student
+git switch main</code></pre>
+<ol start="4">
+<li>Confirm you are in the clone you just created, the working tree is clean, and <code>origin</code> points to your GitHub copy:</li>
+</ol>
+<pre><code>Get-Location
+git status --short
+git remote get-url origin</code></pre>
+<p><code>git status --short</code> must print nothing. Do not continue if it displays modified files or if the remote URL names a different repository.</p>
+<p>You need GitHub CLI authentication only when setup configures secrets and variables in your student repository. <code>gh auth login</code> identifies your GitHub account; the clone&#x27;s <code>origin</code> URL identifies the repository. Setup reads that URL automatically, so you never type an owner/repository value.</p>
+<h2>Step 2: Check your Azure and GitHub sign-ins</h2>
+<p>If you are already signed in to Azure CLI and GitHub CLI on this computer, skip the login commands. Otherwise, from the repository root, run each one that you still need:</p>
+<pre><code>az login
+gh auth login</code></pre>
+<p>For GitHub CLI, select <strong>GitHub.com</strong>, <strong>HTTPS</strong>, and browser authentication. Authorize the account that owns your student repository.</p>
+<p>You can check both existing sessions without signing in again:</p>
+<pre><code>az account show --output table
+gh auth status</code></pre>
+<p>Setup checks these sessions again and reuses them. The GitHub Actions workflow later obtains its own short-lived Azure token through OIDC when it runs; that automatic workflow authentication is separate from your local <code>az login</code>.</p>
+<h2>Step 3: Run the guided setup</h2>
+<p>Stay at the repository root and run:</p>
+<pre><code>.\11-Automate-Model-Training-GitHub-Actions\setup.ps1</code></pre>
+<p>Setup first displays the repository detected from <code>origin</code>. It stops if you are in the course source repository, an unrelated clone, or a branch other than <code>main</code>. Then it shows numbered subscriptions and asks what to enter:</p>
+<ol start="1">
+<li>Select the Azure subscription by typing the number shown beside it.</li>
+<li>Press Enter for <code>eastus</code>, or type a region where your subscription has the required CPU quota.</li>
+<li>Press Enter for <code>rg-course-ml</code>, or use a unique generic name such as <code>rg-course-ml-kd</code> in a shared subscription.</li>
+<li>Press Enter for <code>mlw-course-ml</code>, or type another generic workspace name.</li>
+<li>Review the printed subscription, region, resource group, workspace, <code>course-cpu</code> cluster, data asset, student repository, and OIDC subject.</li>
+<li>Review the Azure what-if output. It is a preview and does not create resources.</li>
+<li>Type <code>deploy</code> when asked to create the displayed resources.</li>
+</ol>
+<p>The script detects the GitHub repository from the <code>origin</code> remote; it does not ask you to type the repository name or subscription ID. It also:</p>
+<ul>
+<li>registers required Azure resource providers when necessary;</li>
+<li>deploys the Bicep template;</li>
+<li>extracts and validates the nine CSV files from <code>datasets/olist/Ecommerce Dataset.zip</code>;</li>
+<li>uploads and registers <code>olist-ecommerce-raw:1</code>;</li>
+<li>creates repository-specific OIDC trust for <code>main</code>;</li>
+<li>gives <code>id-course-github</code> AzureML Data Scientist access only on this workspace;</li>
+<li>writes the required GitHub secrets and variables.</li>
+</ul>
+<p>The ignored file <code>11-Automate-Model-Training-GitHub-Actions/.lab11.parameters.json</code> contains resource identifiers but no passwords.</p>
+<h2>Step 4: Verify setup before training</h2>
+<p>Use the values you selected:</p>
+<pre><code>$RG = &quot;rg-course-ml&quot;
+$WS = &quot;mlw-course-ml&quot;
+
+az ml workspace show -g $RG -n $WS --query &quot;{name:name,location:location}&quot; -o table
+az ml compute show -g $RG -w $WS -n course-cpu --query &quot;{name:name,type:type,size:size,min:min_instances,max:max_instances}&quot; -o table
+az ml data show -g $RG -w $WS -n olist-ecommerce-raw -v 1 --query &quot;{name:name,version:version,type:type,path:path}&quot; -o yaml</code></pre>
+<p>Expected results:</p>
+<ul>
+<li>workspace name matches <code>$WS</code>;</li>
+<li>compute is <code>course-cpu</code>, type <code>amlcompute</code>, minimum 0 and maximum 1;</li>
+<li>data is <code>olist-ecommerce-raw</code>, version <code>1</code>, type <code>uri_folder</code>.</li>
+</ul>
+<p>Open your student repository on GitHub and select <strong>Settings</strong> → <strong>Secrets and variables</strong> → <strong>Actions</strong>. Setup creates:</p>
+<table><thead><tr><th>Kind</th><th>Name</th><th>Purpose</th></tr></thead><tbody>
+<tr><td>Secret</td><td><code>AZURE_CLIENT_ID</code></td><td>Client ID of <code>id-course-github</code>.</td></tr>
+<tr><td>Secret</td><td><code>AZURE_TENANT_ID</code></td><td>Selected Azure tenant.</td></tr>
+<tr><td>Secret</td><td><code>AZURE_SUBSCRIPTION_ID</code></td><td>Selected subscription.</td></tr>
+<tr><td>Variable</td><td><code>AZURE_RESOURCE_GROUP</code></td><td>Resource group selected during setup.</td></tr>
+<tr><td>Variable</td><td><code>AZURE_ML_WORKSPACE</code></td><td>Workspace selected during setup.</td></tr>
+<tr><td>Variable</td><td><code>AZURE_ML_COMPUTE</code></td><td><code>course-cpu</code>.</td></tr>
+<tr><td>Variable</td><td><code>ENABLE_AZURE_TRAINING</code></td><td><code>true</code>; allows the workflow job to run.</td></tr>
+</tbody></table>
+<p>There is no <code>AZURE_CREDENTIALS</code> client-secret JSON. OIDC exchanges the GitHub token for a short-lived Azure token at workflow runtime.</p>
+<p>If your repository&#x27;s <strong>Actions</strong> page asks you to enable workflows, enable them before continuing.</p>
+<h2>Step 5: Review the files that control training</h2>
+<p>Open these files:</p>
+<ul>
+<li><code>.github/workflows/train-freight.yml</code>: authentication, validation, job submission, polling, and triggers.</li>
+<li><code>11-Automate-Model-Training-GitHub-Actions/jobs/train-job.yml</code>: data, environment, compute, command, and hyperparameters.</li>
+<li><code>11-Automate-Model-Training-GitHub-Actions/src/train.py</code>: data preparation, training, evaluation, MLflow logging, and model saving.</li>
+</ul>
+<p>The workflow runs manually or after a push to <code>main</code> changes the Lab 11 job definition or source folder. Documentation and workflow-maintenance commits do not start a billable training run.</p>
+<h2>Step 6: Make the learner change</h2>
+<p>Open <code>11-Automate-Model-Training-GitHub-Actions/jobs/train-job.yml</code>. Change:</p>
+<pre><code>max_iter: 600</code></pre>
+<p>to:</p>
+<pre><code>max_iter: 650</code></pre>
+<p>Review only that intended change:</p>
+<pre><code>git diff -- .\11-Automate-Model-Training-GitHub-Actions\jobs\train-job.yml</code></pre>
+<h2>Step 7: Push and trigger the workflow</h2>
+<p>Commit directly to your student repository&#x27;s <code>main</code> branch:</p>
+<pre><code>git add .\11-Automate-Model-Training-GitHub-Actions\jobs\train-job.yml
+git commit -m &quot;Exercise 11: increase freight training iterations&quot;
+git push origin main</code></pre>
+<p>No pull request, branch-protection rule, instructor approval, or client secret is required. The path-filtered push starts <strong>Train freight model in Azure ML</strong>.</p>
+<h2>Step 8: Follow the GitHub Actions run</h2>
+<ol start="1">
+<li>Open your student repository on GitHub.</li>
+<li>Select <strong>Actions</strong>.</li>
+<li>Open the newest <strong>Train freight model in Azure ML</strong> run created by your push.</li>
+</ol>
+<p>The workflow performs these operations in order:</p>
+<ol start="1">
+<li>Checks out the exact Git commit.</li>
+<li>Requests an OIDC token and signs in through <code>id-course-github</code>.</li>
+<li>Installs the Azure ML CLI extension.</li>
+<li>Removes accidental whitespace from the resource variables.</li>
+<li>Verifies the workspace, selected compute, and <code>olist-ecommerce-raw:1</code> data asset.</li>
+<li>Submits <code>train-job.yml</code>, overriding compute with the verified <code>AZURE_ML_COMPUTE</code> value.</li>
+<li>Adds the Git commit and workflow URL to the Azure ML job environment and tags.</li>
+<li>Polls Azure ML until the job completes or fails.</li>
+<li>Writes the job name, data asset, compute name, commit, and Studio link to the workflow summary.</li>
+</ol>
+<p>The first run can wait several minutes while <code>course-cpu</code> scales from zero and Azure ML prepares the curated environment.</p>
+<h2>Step 9: Validate the Azure ML training job</h2>
+<p>Use the Studio link in the workflow summary, or open the workspace in Azure ML studio and select <strong>Jobs</strong>.</p>
+<p>Verify:</p>
+<ul>
+<li><strong>Status</strong> is <strong>Completed</strong>.</li>
+<li><strong>Experiment</strong> is <code>olist-freight-cost</code>.</li>
+<li><strong>Code</strong> came from the pushed Git commit.</li>
+<li><strong>Input</strong> is data asset <code>olist-ecommerce-raw</code>, version <code>1</code>, mounted read-only.</li>
+<li><strong>Compute</strong> is the cluster stored in <code>AZURE_ML_COMPUTE</code>, normally <code>course-cpu</code>.</li>
+<li><strong>Parameters</strong> show <code>max_iter</code> as <code>650</code>.</li>
+<li><strong>Metrics</strong> include baseline, linear, and boosting MAE/RMSE/R2 values plus <code>mae_improvement_vs_baseline</code>.</li>
+<li><strong>Tags</strong> include <code>git_commit</code> matching the GitHub commit.</li>
+<li><strong>Outputs + logs</strong> contain <code>outputs/metrics.json</code>, <code>outputs/model/</code>, plots, and feature importance artifacts.</li>
+</ul>
+<p>The saved MLflow model is a job output and MLflow artifact. This exercise does not automatically register or deploy the model; those are separate release decisions after evaluation.</p>
+<h2>Step 10: Understand reruns</h2>
+<p>Use <strong>Run workflow</strong> on the Actions page only when you intentionally want to rerun the same configuration. A manual run is billable just like a push run. Do not repeatedly push while another training run is active; the workflow queues runs instead of cancelling an active experiment.</p>
+<h2>Step 11: Clean up</h2>
+<p>When the class no longer needs the workspace, delete the dedicated resource group. This removes the workspace, cluster, storage, monitoring resources, and GitHub identity together:</p>
+<pre><code>az group delete --name $RG --yes
+az group exists --name $RG</code></pre>
+<p>Wait until the second command returns <code>false</code>. Resource-group deletion is asynchronous. Deleting a soft-deleted key vault can leave its globally unique name reserved for the retention period.</p>
+<p>Delete the three Azure secrets and four Azure variables from the repository if the repository will be reused for a different subscription.</p>
+<h2>Troubleshooting</h2>
+<ul>
+<li><strong>Setup cannot read the repository:</strong> confirm <code>git remote -v</code> points to your student repository and <code>gh auth status</code> shows its owner account.</li>
+<li><strong>Setup unexpectedly asks for a subscription ID or <code>OWNER/REPO</code>:</strong> you are running an old setup script or are in the wrong clone. Run <code>Get-Location</code>, <code>git status --short</code>, and <code>git remote get-url origin</code>; then return to the clean <code>lab11-student</code> folder created in Step 1.</li>
+<li><strong>Setup says administrator access is required:</strong> run setup from a repository created under your account with <strong>Use this template</strong>, not the instructor&#x27;s source repository.</li>
+<li><strong>OIDC login fails:</strong> rerun setup from the same student repository. OIDC trust is specific to the repository and <code>main</code> branch.</li>
+<li><strong>Compute quota fails:</strong> choose another region or rerun setup with a VM size available in your subscription, for example <code>-VmSize &#x27;&lt;available-cpu-sku&gt;&#x27;</code>.</li>
+<li><strong>Workflow cannot find data:</strong> confirm version <code>1</code> exists in the same workspace configured by <code>AZURE_ML_WORKSPACE</code>.</li>
+<li><strong>Workflow cannot find compute:</strong> confirm <code>AZURE_ML_COMPUTE</code> exactly matches an existing Azure ML compute cluster. Setup uses <code>course-cpu</code>.</li>
+<li><strong>The workflow is skipped:</strong> confirm <code>ENABLE_AZURE_TRAINING</code> equals the lowercase value <code>true</code> in your repository&#x27;s Actions variables.</li>
+<li><strong>The first job waits in Starting or Preparing:</strong> the zero-node cluster must allocate a VM and prepare the curated environment. Check regional quota and Azure ML job logs before resubmitting.</li>
+</ul></article></main><footer>Run cloud commands in your own Azure ML workspace. See each lab's validation status.</footer></body></html>

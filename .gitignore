@@ -1,0 +1,14 @@
+**/.env
+**/config.json
+**/.venv/
+**/__pycache__/
+**/.ipynb_checkpoints/
+**/.freight-run-ids.json
+**/.sweep-run-id.json
+**/.mlflow/
+**/mlruns/
+**/mlflow-local.db
+12-Foundry-Fine-Tuning-GitHub-Actions/.parameters.json
+/datasets/olist/Ecommerce Dataset/
+
+**/.lab11.parameters.json

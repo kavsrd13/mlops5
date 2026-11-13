@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Exercise 02: Delivery-demand hotspots | Operationalize Machine Learning Models</title>
+<link rel="stylesheet" href="../../assets/site.css"></head>
+<body><header><a class="brand" href="../../index.html">Operationalize Machine Learning Models</a><span>Student lab guide</span></header>
+<main><nav><a href="../../index.html">← All exercises</a></nav><article><h1>Exercise 02: Delivery-demand hotspots</h1>
+<h2>Goal</h2>
+<p>Aggregate orders by location and explore geographic clusters. The result describes demand concentrations and does not determine optimal warehouse sites.</p>
+<h2>Fork and clone the public repository</h2>
+<p>Install Python 3.10 or 3.11, Git, Azure CLI, and a notebook editor. The public course repository can be inspected or cloned without a GitHub login:</p>
+<pre><code>git clone https://github.com/kavsrd13/operationalize-ml-models-labs.git</code></pre>
+<p>To save your exercise work in your own GitHub account, sign in at <a href="https://github.com/">GitHub</a>, open <a href="https://github.com/kavsrd13/operationalize-ml-models-labs">the course repository</a>, select <strong>Fork</strong>, and then select <strong>Create fork</strong>. Clone your fork instead of the upstream repository:</p>
+<pre><code>git clone https://github.com/YOUR-GITHUB-USERNAME/operationalize-ml-models-labs.git
+Set-Location .\operationalize-ml-models-labs
+git remote add upstream https://github.com/kavsrd13/operationalize-ml-models-labs.git
+git remote -v</code></pre>
+<p>No <code>gh auth login</code> command is needed for cloning. GitHub sign-in is required only to create the fork or push changes to it.</p>
+<p>Run local setup; this lab does not create Azure resources:</p>
+<pre><code>python .\00-Shared-Setup-and-Data\scripts\bootstrap.py --skip-azure</code></pre>
+<p>Select the <strong>Python (Olist Azure ML)</strong> notebook kernel.</p>
+<h2>Code files</h2>
+<p>The actual code for this exercise is here:</p>
+<ul>
+<li><a href="../olist-delivery-demand-hotspots.ipynb"><code>olist-delivery-demand-hotspots.ipynb</code></a></li>
+</ul>
+<p>Run commands from the repository root. Olist&#x27;s source ZIP is stored once in <code>datasets/olist</code> and extracted by setup.</p>
+<h2>Run</h2>
+<ol start="1">
+<li>Use the local setup above and select <strong>Python (Olist Azure ML)</strong>.</li>
+<li>Open <code>../olist-delivery-demand-hotspots.ipynb</code> and run cells in order.</li>
+<li>Inspect ZIP-prefix coordinate cleaning. Count records before and after removing invalid coordinates.</li>
+<li>Aggregate orders by location and inspect demand counts. Compare a high-demand and low-demand area.</li>
+<li>Run clustering and view the static plot. Explain how cluster count changes the map; the result describes demand, not optimal warehouse placement.</li>
+<li>If internet is available, display the Folium map. Its background tiles require network access; the static plots work offline.</li>
+</ol>
+<p>See <code>ORIGINAL_README.md</code> for the source note.</p></article></main><footer>Run cloud commands in your own Azure ML workspace. See each lab's validation status.</footer></body></html>

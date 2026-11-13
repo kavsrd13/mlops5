@@ -1,0 +1,125 @@
+name: Exercise 12 - Fine-tune MedTriage model
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '12-Foundry-Fine-Tuning-GitHub-Actions/data/**'
+      - '12-Foundry-Fine-Tuning-GitHub-Actions/config/**'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: medtriage-finetuning-main
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate supported model configuration
+        run: |
+          python 12-Foundry-Fine-Tuning-GitHub-Actions/scripts/validate_config.py \
+            12-Foundry-Fine-Tuning-GitHub-Actions/config/finetune.json \
+            --github-env "$GITHUB_ENV"
+
+      - name: Validate configured datasets
+        run: |
+          python 12-Foundry-Fine-Tuning-GitHub-Actions/scripts/validate_dataset.py \
+            "$MEDTRIAGE_TRAINING_FILE" \
+            "$MEDTRIAGE_VALIDATION_FILE"
+
+  baseline-and-submit:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      FOUNDRY_PROJECT_ENDPOINT: ${{ vars.MEDTRIAGE_FOUNDRY_PROJECT_ENDPOINT }}
+      AZURE_CLIENT_ID: ${{ secrets.MEDTRIAGE_AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.MEDTRIAGE_AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.MEDTRIAGE_AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve model and dataset configuration
+        run: |
+          python 12-Foundry-Fine-Tuning-GitHub-Actions/scripts/validate_config.py \
+            12-Foundry-Fine-Tuning-GitHub-Actions/config/finetune.json \
+            --github-env "$GITHUB_ENV"
+
+      - name: Check this fork's Azure configuration
+        run: |
+          missing=0
+          for name in FOUNDRY_PROJECT_ENDPOINT AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID; do
+            if [ -z "${!name}" ]; then
+              echo "$name is not configured in this fork." >&2
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Run 12-Foundry-Fine-Tuning-GitHub-Actions/setup.ps1 from this fork, then push again." >&2
+            exit 1
+          fi
+
+      - name: Sign in to Azure with GitHub OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Foundry SDK dependencies
+        run: python -m pip install --disable-pip-version-check -r 12-Foundry-Fine-Tuning-GitHub-Actions/requirements.txt
+
+      - name: Evaluate base model on held-out examples
+        run: |
+          set -euo pipefail
+          python 12-Foundry-Fine-Tuning-GitHub-Actions/scripts/evaluate_baseline.py \
+            --project-endpoint "$FOUNDRY_PROJECT_ENDPOINT" \
+            --validation-file "$MEDTRIAGE_VALIDATION_FILE" \
+            --output baseline_metrics.json
+
+      - name: Upload data and submit supervised fine-tuning
+        id: submit
+        run: |
+          set -euo pipefail
+          python 12-Foundry-Fine-Tuning-GitHub-Actions/scripts/submit_finetune.py \
+            --project-endpoint "$FOUNDRY_PROJECT_ENDPOINT" \
+            --config 12-Foundry-Fine-Tuning-GitHub-Actions/config/finetune.json \
+            --training-file "$MEDTRIAGE_TRAINING_FILE" \
+            --validation-file "$MEDTRIAGE_VALIDATION_FILE" \
+            --output fine_tuning_job.json
+          JOB_ID=$(python -c "import json; print(json.load(open('fine_tuning_job.json'))['job']['id'])")
+          echo "job_id=$JOB_ID" >> "$GITHUB_OUTPUT"
+          echo "### MedTriage fine-tuning submitted" >> "$GITHUB_STEP_SUMMARY"
+          echo "Job ID: \`$JOB_ID\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Baseline metrics:" >> "$GITHUB_STEP_SUMMARY"
+          cat baseline_metrics.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Monitor training and collect checkpoints
+        run: |
+          python 12-Foundry-Fine-Tuning-GitHub-Actions/scripts/monitor_finetune.py \
+            --project-endpoint "$FOUNDRY_PROJECT_ENDPOINT" \
+            --job-id "${{ steps.submit.outputs.job_id }}" \
+            --output fine_tuning_result.json
+          FINE_TUNED_MODEL=$(python -c "import json; print(json.load(open('fine_tuning_result.json'))['job']['fine_tuned_model'])")
+          echo "### MedTriage fine-tuning completed" >> "$GITHUB_STEP_SUMMARY"
+          echo "Fine-tuned model: \`$FINE_TUNED_MODEL\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve experiment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fine-tuning-job
+          path: |
+            fine_tuning_job.json
+            fine_tuning_result.json
+            baseline_metrics.json
+          if-no-files-found: warn

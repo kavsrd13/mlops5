@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Exercise 12: Automatic Foundry fine-tuning from your GitHub fork | Operationalize Machine Learning Models</title>
+<link rel="stylesheet" href="../../assets/site.css"></head>
+<body><header><a class="brand" href="../../index.html">Operationalize Machine Learning Models</a><span>Student lab guide</span></header>
+<main><nav><a href="../../index.html">← All exercises</a></nav><article><h1>Exercise 12: Automatic Foundry fine-tuning from your GitHub fork</h1>
+<h2>Goal</h2>
+<p>Fork the course repository, connect your fork to your Microsoft Foundry project once, change <code>n_epochs</code> from 2 to 3, and push to <code>main</code>. Your push automatically starts a supervised fine-tuning job. No pull request or instructor approval is required.</p>
+<h2>Why fine-tune this model?</h2>
+<p>The base <code>gpt-4.1-mini</code> model can already understand symptom descriptions, but this exercise requires a repeatable task-specific behavior:</p>
+<ul>
+<li>Return one JSON object with exactly <code>urgency</code>, <code>department</code>, <code>reason</code>, and <code>next_step</code>.</li>
+<li>Use only the four approved urgency labels.</li>
+<li>Route requests to an appropriate department.</li>
+<li>Refuse diagnosis and medication-dose requests.</li>
+<li>Treat non-triage requests as <code>Not Applicable</code>.</li>
+</ul>
+<p>Supervised fine-tuning shows the model many reviewed input-output examples and updates its weights toward that behavior. This can improve format consistency, label consistency, and response style without putting many examples into every production prompt. Fine-tuning is effective only when the examples are accurate, consistent, representative, and measured against a base-model baseline and a held-out test set.</p>
+<p>Fine-tuning does <strong>not</strong> add a trusted medical knowledge source, guarantee a correct triage decision, or replace prompt safety rules, clinical review, and formal evaluation. This is a training demonstration and must not be used for real patient care.</p>
+<h2>Student workflow</h2>
+<pre><code>Fork and clone the course repository
+        ↓
+Run setup.ps1 once for your fork and Azure account
+        ↓
+Change n_epochs from 2 to 3
+        ↓
+Validate, commit, and push to your fork&#x27;s main branch
+        ↓
+GitHub Actions automatically creates and monitors the Foundry job
+        ↓
+Deploy an evaluated checkpoint
+        ↓
+Test the fine-tuned deployment in the Foundry playground</code></pre>
+<h2>Before you start</h2>
+<p>You need:</p>
+<ul>
+<li>A GitHub account.</li>
+<li>An Azure account with an enabled subscription.</li>
+<li>Permission to create or reuse a Foundry resource, create a managed identity, assign the <strong>Foundry User</strong> role, and create a model deployment. <strong>Owner</strong> on the exercise subscription is the simplest classroom option.</li>
+<li>Available <code>gpt-4.1-mini</code> fine-tuning quota in the selected Azure region.</li>
+<li>Git, Python 3.10 or later, PowerShell, <a href="https://learn.microsoft.com/cli/azure/install-azure-cli">Azure CLI</a>, and <a href="https://cli.github.com/">GitHub CLI</a>.</li>
+</ul>
+<p>Fine-tuning is billable. Use an exercise subscription and delete resources when the class is complete.</p>
+<h2>Step 1: Fork and clone the repository</h2>
+<ol start="1">
+<li>Sign in to <a href="https://github.com/">GitHub</a>.</li>
+<li>Open <a href="https://github.com/kavsrd13/operationalize-ml-models-labs">kavsrd13/operationalize-ml-models-labs</a>.</li>
+<li>Select <strong>Fork</strong>, and then select <strong>Create fork</strong>.</li>
+<li>Replace <code>YOUR-GITHUB-USERNAME</code> and run:</li>
+</ol>
+<pre><code>git clone https://github.com/YOUR-GITHUB-USERNAME/operationalize-ml-models-labs.git
+Set-Location .\operationalize-ml-models-labs
+git branch --show-current</code></pre>
+<p>The final command must show <code>main</code>. The <code>origin</code> remote now points to your fork, so the setup script configures your repository rather than the instructor&#x27;s repository.</p>
+<h2>Step 2: Sign in and configure your fork once</h2>
+<p>Sign in from the repository root:</p>
+<pre><code>az login --use-device-code
+gh auth login</code></pre>
+<p>For <code>gh auth login</code>, select:</p>
+<ol start="1">
+<li><code>GitHub.com</code></li>
+<li><code>HTTPS</code></li>
+<li><code>Login with a web browser</code></li>
+</ol>
+<p>Run the guided setup:</p>
+<pre><code>.\12-Foundry-Fine-Tuning-GitHub-Actions\setup.ps1</code></pre>
+<p>The script detects your fork automatically. Follow the numbered choices shown in the terminal:</p>
+<ol start="1">
+<li>Select the Azure subscription by entering its displayed number.</li>
+<li>Enter <code>1</code> to reuse an existing Foundry resource, <code>2</code> to create a new resource, or <code>3</code> to exit.</li>
+<li>If you select an existing resource, enter the displayed resource and project numbers.</li>
+<li>Review the Bicep preview. Enter <code>1</code> to deploy, <code>2</code> to display the preview again, or <code>3</code> to exit.</li>
+</ol>
+<p>Setup performs the one-time platform work:</p>
+<ul>
+<li>Selects or creates the Foundry resource and project.</li>
+<li>Checks fine-tuning quota.</li>
+<li>Reuses or creates the <code>medtriage-base</code> deployment.</li>
+<li>Creates an identity trusted only by your fork&#x27;s <code>main</code> branch.</li>
+<li>Assigns <strong>Foundry User</strong> only at the Foundry project scope.</li>
+<li>Enables GitHub Actions and the Exercise 12 workflow in your fork.</li>
+<li>Adds the required secrets and variables to your fork.</li>
+</ul>
+<p>Continue only after the terminal reports <code>Automation is ready</code> and displays the Actions URL for your fork.</p>
+<h2>Step 3: Change the number of epochs</h2>
+<p>Open:</p>
+<p><code>12-Foundry-Fine-Tuning-GitHub-Actions/config/finetune.json</code></p>
+<p>Find:</p>
+<pre><code>&quot;hyperparameters&quot;: {
+  &quot;n_epochs&quot;: 2,
+  &quot;batch_size&quot;: 4,
+  &quot;learning_rate_multiplier&quot;: 0.5
+}</code></pre>
+<p>Change only <code>n_epochs</code> from <code>2</code> to <code>3</code>:</p>
+<pre><code>&quot;hyperparameters&quot;: {
+  &quot;n_epochs&quot;: 3,
+  &quot;batch_size&quot;: 4,
+  &quot;learning_rate_multiplier&quot;: 0.5
+}</code></pre>
+<p>Keeping all other values unchanged makes the three-epoch experiment comparable with the two-epoch reference run.</p>
+<h2>Step 4: Validate the change</h2>
+<p>Run from the repository root:</p>
+<pre><code>python .\12-Foundry-Fine-Tuning-GitHub-Actions\scripts\validate_config.py `
+  .\12-Foundry-Fine-Tuning-GitHub-Actions\config\finetune.json</code></pre>
+<p>The final line must report <code>n_epochs: 3</code>.</p>
+<p>Confirm that only the intended configuration changed:</p>
+<pre><code>git diff -- .\12-Foundry-Fine-Tuning-GitHub-Actions\config\finetune.json</code></pre>
+<h2>Step 5: Push and trigger fine-tuning</h2>
+<p>Commit directly to your fork&#x27;s <code>main</code> branch:</p>
+<pre><code>git add .\12-Foundry-Fine-Tuning-GitHub-Actions\config\finetune.json
+git commit -m &quot;Exercise 12: compare three training epochs&quot;
+git push origin main</code></pre>
+<p>That push automatically triggers the workflow because a file under the Exercise 12 <code>config</code> folder changed. You do not open a pull request, and no instructor merge or approval is required.</p>
+<h2>Step 6: Watch the automated experiment</h2>
+<ol start="1">
+<li>Open your fork on GitHub.</li>
+<li>Select <strong>Actions</strong>.</li>
+<li>Open the newest workflow run created by your push.</li>
+</ol>
+<p>The workflow:</p>
+<ol start="1">
+<li>Validates the configuration and datasets.</li>
+<li>Signs in to Azure through repository-specific GitHub OIDC without a client secret.</li>
+<li>Evaluates ten held-out examples against <code>medtriage-base</code>.</li>
+<li>Uploads the training and validation files through the Azure AI Projects SDK.</li>
+<li>Calls <code>fine_tuning.jobs.create()</code> with the supervised hyperparameters.</li>
+<li>Writes the Foundry job ID to the workflow summary.</li>
+<li>Monitors the job until it succeeds, fails, or is cancelled.</li>
+<li>Uploads the baseline and fine-tuning evidence as a GitHub artifact.</li>
+</ol>
+<p>The baseline takes several minutes and fine-tuning takes longer. Do not push another data or configuration experiment while this run is active.</p>
+<h2>Step 7: Confirm the Foundry job</h2>
+<p>Use the resource, project, and Actions URL printed by your setup script:</p>
+<ol start="1">
+<li>Open your Foundry project.</li>
+<li>Open <strong>Fine-tuning</strong>.</li>
+<li>Match the job ID to the ID in the GitHub Actions summary.</li>
+<li>Confirm the base model is <code>gpt-4.1-mini-2025-04-14</code>.</li>
+<li>Confirm the job uses three epochs.</li>
+</ol>
+<p>A created job proves that the automation works. It does not prove that the fine-tuned model is better or safe to deploy.</p>
+<h2>Step 8: Evaluate and choose a checkpoint</h2>
+<p>After training succeeds, compare its checkpoints and held-out results with the base-model metrics stored in the GitHub artifact. Do not automatically assume the final checkpoint is best. Select the checkpoint that improves JSON-schema compliance and urgency-label accuracy without introducing unsafe or incorrect responses.</p>
+<p>Use prompts that were not present in either training or validation data. The same prompts and system instruction must be used for the base and fine-tuned deployments so the comparison is fair.</p>
+<h2>Step 9: Deploy the selected fine-tuned model</h2>
+<p>Deployment requires a role that can create model deployments, such as <strong>Foundry Owner</strong>, or another role containing <code>Microsoft.CognitiveServices/accounts/deployments/write</code>. A learner who can submit fine-tuning as <strong>Foundry User</strong> might still need deployment permission.</p>
+<ol start="1">
+<li>Open your Foundry project.</li>
+<li>Open <strong>Fine-tuning</strong>, and then open the completed Exercise 12 job.</li>
+<li>Review the job metrics and available checkpoints. Select the evaluated checkpoint you want to test.</li>
+<li>Select <strong>Deploy</strong>, and then select <strong>Serverless</strong>.</li>
+<li>Enter <code>medtriage-ft-v1</code> as the deployment name.</li>
+<li>Select <strong>Global Standard</strong> as the deployment type.</li>
+<li>Select a small evaluation capacity within your quota, create the deployment, and wait until its status is <strong>Succeeded</strong> on the <strong>Models</strong> page.</li>
+</ol>
+<p>If deployment fails because quota is zero, do not retrain the model. Request deployment quota or select a supported deployment type or region with available fine-tuned-model quota.</p>
+<h2>Step 10: Open the playground and add the system instruction</h2>
+<ol start="1">
+<li>On the completed deployment page, select <strong>Open in playground</strong>. If that option is not shown, open <strong>Playgrounds</strong> from the Foundry project.</li>
+<li>In the deployment selector, choose <code>medtriage-ft-v1</code>. Confirm that the selected deployment is not the base deployment <code>medtriage-base</code>.</li>
+<li>In <strong>System message</strong> or <strong>System instructions</strong>, replace any existing text with this instruction:</li>
+</ol>
+<pre><code>You are MedTriage, a hospital symptom triage assistant. Reply ONLY with a single JSON object with the keys urgency (Emergency | Urgent | Routine | Not Applicable), department, reason, next_step. Never give a diagnosis or medication dose. Training demo only - not for clinical use.</code></pre>
+<ol start="4">
+<li>Select <strong>Apply changes</strong>. Select <strong>Continue</strong> if Foundry asks you to confirm the update.</li>
+<li>Start a new chat session so an earlier conversation does not affect the test.</li>
+</ol>
+<p>The system instruction is still required after fine-tuning. Fine-tuning teaches the repeated behavior; the system instruction states the current runtime task and safety boundary.</p>
+<h2>Step 11: Test the fine-tuned model</h2>
+<p>Enter this prompt in the playground chat, and then select <strong>Send</strong>:</p>
+<pre><code>I suddenly developed weakness on the right side of my face and arm, and my speech is unclear. What should I do?</code></pre>
+<p>The response wording can vary, but verify that:</p>
+<ul>
+<li>The response parses as one JSON object with no Markdown fence or extra text.</li>
+<li>It contains exactly <code>urgency</code>, <code>department</code>, <code>reason</code>, and <code>next_step</code>.</li>
+<li><code>urgency</code> is <code>Emergency</code>.</li>
+<li><code>department</code> directs the patient to emergency care or an appropriate emergency specialty.</li>
+<li><code>next_step</code> clearly says to seek immediate emergency help.</li>
+<li>It does not provide a diagnosis or medication dose.</li>
+</ul>
+<p>For a fair comparison, select <code>medtriage-base</code>, apply the same system instruction, and send the same prompt. Compare JSON compliance, urgency-label correctness, safety, and response length. The fine-tuned model is effective only when it improves the required behavior on prompts that were not in its training or validation data.</p>
+<h2>Step 12: Test the deployment with Python code</h2>
+<p>The playground test proves that the deployment works interactively. Now call the same deployment from Python, as an application would.</p>
+<h3>12.1 Find the endpoint, deployment name, and API key</h3>
+<ol start="1">
+<li>In Foundry, open <strong>Models</strong>, and then open your <code>medtriage-ft-v1</code> deployment.</li>
+<li>Select <strong>Get endpoint</strong>, <strong>Code</strong>, or <strong>Use in application</strong>, depending on the label shown in your Foundry portal.</li>
+<li>Copy the OpenAI v1 endpoint. It must end in <code>/openai/v1/</code>. For example:</li>
+</ol>
+<pre><code>   https://finetunning121.services.ai.azure.com/openai/v1/</code></pre>
+<ol start="4">
+<li>Copy the <strong>deployment name</strong>. Use the deployed model name shown on this page, not the fine-tuning job ID or the base-model name.</li>
+<li>Copy an API key from the deployment&#x27;s <strong>Keys and Endpoint</strong> section. If the key is not displayed in Foundry, follow the link to the parent Foundry resource in the Azure portal, select <strong>Keys and Endpoint</strong>, and copy <strong>KEY 1</strong>.</li>
+</ol>
+<p>Treat the API key like a password. Use it only in your local copy of the test file. Never commit or push a real key to GitHub.</p>
+<h3>12.2 Install the dependency</h3>
+<p>In the Exercise 12 folder, activate the virtual environment you used during setup, and install the pinned dependencies:</p>
+<pre><code>.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt</code></pre>
+<h3>12.3 Add your deployment values</h3>
+<p>Open <code>scripts/test_deployment.py</code>. The complete code is shown below. Replace only the <code>endpoint</code>, <code>deployment_name</code>, and <code>api_key</code> placeholders with the values copied from Foundry:</p>
+<pre><code>from openai import OpenAI
+
+
+endpoint = &quot;https://&lt;your-resource-name&gt;.services.ai.azure.com/openai/v1/&quot;
+deployment_name = &quot;&lt;your-deployment-name&gt;&quot;
+api_key = &quot;&lt;your-api-key&gt;&quot;
+
+system_instruction = (
+    &quot;You are MedTriage, a hospital symptom triage assistant. Reply ONLY with &quot;
+    &quot;a single JSON object with the keys urgency (Emergency | Urgent | Routine &quot;
+    &quot;| Not Applicable), department, reason, next_step. Never give a diagnosis &quot;
+    &quot;or medication dose. Training demo only - not for clinical use.&quot;
+)
+
+client = OpenAI(
+    base_url=endpoint,
+    api_key=api_key,
+)
+
+response = client.responses.create(
+    model=deployment_name,
+    instructions=system_instruction,
+    input=(
+        &quot;I suddenly developed weakness on the right side of my face and arm, &quot;
+        &quot;and my speech is unclear. What should I do?&quot;
+    ),
+)
+
+print(f&quot;answer: {response.output_text}&quot;)</code></pre>
+<p>For example, the endpoint can look like <code>https://finetunning121.services.ai.azure.com/openai/v1/</code>. Your deployment name and API key will be different.</p>
+<p>The script sends the same system instruction and emergency-triage prompt used in the playground. It prints <code>response.output_text</code>, which is the readable text returned by the Responses API.</p>
+<h3>12.4 Run the test</h3>
+<pre><code>python .\scripts\test_deployment.py</code></pre>
+<p>Confirm that the printed answer is one JSON object containing <code>urgency</code>, <code>department</code>, <code>reason</code>, and <code>next_step</code>, and that <code>urgency</code> is <code>Emergency</code>.</p>
+<p>After the test succeeds, immediately replace the real API key in the local file with <code>&lt;your-api-key&gt;</code>. Do not run <code>git add</code>, <code>git commit</code>, or <code>git push</code> while the real key is present.</p>
+<h2>Step 13: Clean up the serving deployment</h2>
+<p>After testing:</p>
+<ol start="1">
+<li>Open <strong>Models</strong> in the Foundry project.</li>
+<li>Select <code>medtriage-ft-v1</code>.</li>
+<li>Select <strong>Delete</strong> and confirm the deletion.</li>
+<li>Keep the GitHub artifact and evaluation notes as experiment evidence.</li>
+</ol>
+<p>Deleting the serving deployment stops its hosting cost. It does not erase the fine-tuning job evidence stored in GitHub Actions. The exercise is complete.</p></article></main><footer>Run cloud commands in your own Azure ML workspace. See each lab's validation status.</footer></body></html>
